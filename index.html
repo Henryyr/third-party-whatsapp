@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="id">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>WhatsApp Sender</title>
+        <meta
+            name="description"
+            content="Form pengiriman WhatsApp dengan format +62, pesan, dan opsi jadwal."
+        />
+
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="style.css" />
+        <script src="app.js" defer></script>
+    </head>
+
+    <body>
+        <div class="backdrop" aria-hidden="true"></div>
+
+        <main class="wrap">
+            <header class="hero">
+                <div class="badge">Third Party WhatsApp</div>
+                <h1>Pengiriman WhatsApp</h1>
+                <p>
+                    Masukkan nomor <span class="mono">To</span> dengan prefix
+                    <span class="mono">+62</span>, tulis pesan, lalu kirim
+                    sekarang atau jadwalkan. Nomor pengirim mengikuti device
+                    dari API key.
+                </p>
+            </header>
+
+            <form class="card" action="#" method="post" autocomplete="off">
+                <input
+                    class="sr-only"
+                    type="radio"
+                    id="vendorWablas"
+                    name="vendor"
+                    value="wablas"
+                    checked
+                />
+                <input
+                    class="sr-only"
+                    type="radio"
+                    id="vendorStarSeeder"
+                    name="vendor"
+                    value="starseeder"
+                />
+                <input
+                    class="sr-only"
+                    type="radio"
+                    id="modeNow"
+                    name="mode"
+                    value="now"
+                    checked
+                />
+                <input
+                    class="sr-only"
+                    type="radio"
+                    id="modeSchedule"
+                    name="mode"
+                    value="schedule"
+                />
+
+                <section class="vendor">
+                    <span class="label">Vendor</span>
+                    <div
+                        class="segmented"
+                        role="group"
+                        aria-label="Pilih vendor"
+                    >
+                        <label class="seg" for="vendorWablas">
+                            <span class="seg-title">Wablas</span>
+                            <span class="seg-sub">Provider WhatsApp API</span>
+                        </label>
+                        <label class="seg" for="vendorStarSeeder">
+                            <span class="seg-title">StarSeeder</span>
+                            <span class="seg-sub">Third-party gateway</span>
+                        </label>
+                    </div>
+                    <p class="vendor-note" id="vendorNote"></p>
+                </section>
+
+                <section class="config">
+                    <div class="config-head">
+                        <span class="label">Konfigurasi</span>
+                        <label class="remember">
+                            <input
+                                type="checkbox"
+                                id="rememberConfig"
+                                name="rememberConfig"
+                            />
+                            <span>Simpan di browser</span>
+                        </label>
+                    </div>
+
+                    <section class="grid">
+                        <label class="field">
+                            <span class="label">API Key</span>
+                            <input
+                                type="text"
+                                id="apiKey"
+                                name="apiKey"
+                                placeholder="Masukkan API key…"
+                                autocomplete="off"
+                            />
+                            <span class="hint"
+                                >Dipakai untuk autentikasi ke
+                                vendor/backend.</span
+                            >
+                        </label>
+
+                        <label class="field">
+                            <span class="label">Secret Key</span>
+                            <input
+                                type="password"
+                                id="secretKey"
+                                name="secretKey"
+                                placeholder="Masukkan secret key…"
+                                autocomplete="off"
+                            />
+                            <span class="hint"
+                                >Jangan share. Simpan di browser hanya jika
+                                perangkat aman.</span
+                            >
+                        </label>
+                    </section>
+
+                    <details class="advanced">
+                        <summary>Advanced (opsional)</summary>
+                        <section class="grid">
+                            <label class="field">
+                                <span class="label">Test URL</span>
+                                <input
+                                    type="url"
+                                    id="testUrl"
+                                    name="testUrl"
+                                    placeholder="https://example.com/api/test"
+                                    inputmode="url"
+                                    autocomplete="off"
+                                />
+                                <span class="hint"
+                                    >Jika diisi, tombol test akan melakukan
+                                    request ke URL ini.</span
+                                >
+                            </label>
+
+                            <label class="field">
+                                <span class="label">Send URL</span>
+                                <input
+                                    type="url"
+                                    id="sendUrl"
+                                    name="sendUrl"
+                                    placeholder="https://example.com/api/send"
+                                    inputmode="url"
+                                    autocomplete="off"
+                                />
+                                <span class="hint"
+                                    >Jika diisi, tombol kirim akan request ke
+                                    URL ini.</span
+                                >
+                            </label>
+                        </section>
+                    </details>
+
+                    <section class="actions config-actions">
+                        <button
+                            class="btn secondary"
+                            type="button"
+                            id="btnTest"
+                        >
+                            Test konfigurasi
+                        </button>
+                        <button class="btn ghost" type="button" id="btnSave">
+                            Simpan konfigurasi
+                        </button>
+                    </section>
+
+                    <section
+                        class="status"
+                        id="status"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        <div class="status-title" id="statusTitle">
+                            Status: belum ditest
+                        </div>
+                        <pre class="status-body" id="statusBody"></pre>
+                    </section>
+                </section>
+
+                <label class="field">
+                    <span class="label">To</span>
+                    <textarea
+                        name="to"
+                        rows="3"
+                        inputmode="numeric"
+                        placeholder="08123456789, 08139876543 (pisahkan dengan koma / baris baru)"
+                        autocomplete="off"
+                        spellcheck="false"
+                        required
+                    ></textarea>
+                    <span class="hint"
+                        >Bisa lebih dari 1 nomor. Boleh format
+                        <span class="mono">08…</span> /
+                        <span class="mono">62…</span> /
+                        <span class="mono">+62…</span>. Akan dinormalisasi
+                        otomatis.</span
+                    >
+                </label>
+
+                <label class="field">
+                    <span class="label">Message</span>
+                    <textarea
+                        name="message"
+                        rows="5"
+                        placeholder="Tulis pesan yang akan dikirim…"
+                        required
+                    ></textarea>
+                    <span class="hint"
+                        >Gunakan bahasa yang singkat dan jelas.</span
+                    >
+                </label>
+
+                <section class="compliance">
+                    <span class="label">Compliance</span>
+                    <label class="checkline">
+                        <input
+                            type="checkbox"
+                            id="optIn"
+                            name="optIn"
+                            required
+                        />
+                        <span
+                            >Saya punya izin/opt-in dari penerima untuk
+                            dihubungi via WhatsApp</span
+                        >
+                    </label>
+                    <label class="checkline">
+                        <input
+                            type="checkbox"
+                            id="includeOptOut"
+                            name="includeOptOut"
+                            checked
+                        />
+                        <span
+                            >Tambahkan teks opt-out (contoh: “Balas STOP untuk
+                            berhenti”)</span
+                        >
+                    </label>
+                    <span class="hint"
+                        >Guardrail ini membantu menurunkan risiko report/spam
+                        (penyebab utama nomor keblokir).</span
+                    >
+                </section>
+
+                <section class="mode">
+                    <span class="label">Pengiriman</span>
+                    <div
+                        class="segmented"
+                        role="group"
+                        aria-label="Mode pengiriman"
+                    >
+                        <label class="seg" for="modeNow">
+                            <span class="seg-title">Kirim sekarang</span>
+                            <span class="seg-sub">Langsung diproses</span>
+                        </label>
+                        <label class="seg" for="modeSchedule">
+                            <span class="seg-title">Jadwalkan</span>
+                            <span class="seg-sub">Pilih tanggal &amp; jam</span>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="schedule" aria-live="polite">
+                    <label class="field">
+                        <span class="label">Jadwal</span>
+                        <input type="datetime-local" name="scheduleAt" />
+                        <span class="hint"
+                            >Waktu mengikuti zona waktu perangkat.</span
+                        >
+                    </label>
+
+                    <div class="schedule-confirm">
+                        <label class="checkline">
+                            <input
+                                type="checkbox"
+                                id="confirmRequired"
+                                name="confirmRequired"
+                                checked
+                            />
+                            <span
+                                >Minta konfirmasi penerima dulu (penerima cukup
+                                balas “YA”)</span
+                            >
+                        </label>
+
+                        <label class="field">
+                            <span class="label">Batas Konfirmasi (menit)</span>
+                            <input
+                                type="number"
+                                id="confirmWindowMinutes"
+                                name="confirmWindowMinutes"
+                                min="5"
+                                max="10080"
+                                step="5"
+                                value="1440"
+                            />
+                            <span class="hint"
+                                >Butuh webhook inbound. Tanpa balasan, pesan
+                                terjadwal tidak akan dikirim.</span
+                            >
+                        </label>
+                    </div>
+                </section>
+
+                <section class="actions">
+                    <button class="btn primary" type="submit">
+                        <span class="btn-now">Kirim pesan</span>
+                        <span class="btn-schedule">Jadwalkan pesan</span>
+                    </button>
+                    <button class="btn ghost" type="reset">Reset</button>
+                </section>
+
+                <footer class="fineprint">
+                    <p>
+                        Pastikan format nomor benar. Prefix
+                        <span class="mono">+62</span> sudah otomatis. Nomor
+                        pengirim mengikuti device dari API key. Vendor &amp;
+                        konfigurasi dipakai saat test/kirim.
+                    </p>
+                </footer>
+            </form>
+        </main>
+    </body>
+</html>

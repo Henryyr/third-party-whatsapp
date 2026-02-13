@@ -1,0 +1,10 @@
+{
+  "name": "third-party-whatsapp-test",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node main.js --port 3000",
+    "dev": "node --watch main.js --port 3000"
+  }
+}
