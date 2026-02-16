@@ -12,6 +12,8 @@ const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
 const WABLAS_BASE = process.env.WABLAS_BASE || "https://jkt.wablas.com";
 const WABLAS_PHONE_BASE =
   process.env.WABLAS_PHONE_BASE || "https://phone.wablas.com";
+const TELEGRAM_BASE =
+  process.env.TELEGRAM_BASE || "https://telecore.mywifi.web.id/api/telegram";
 
 function parseArgs(argv) {
   const args = {
@@ -141,6 +143,7 @@ function getVendor(req, body) {
   if (!vendor) return "";
   if (vendor === "starseeder") return "starsender";
   if (vendor === "starsender") return "starsender";
+  if (vendor === "telegram") return "telegram";
   return vendor;
 }
 
@@ -191,6 +194,39 @@ function normalizeIndoMsisdnDigits(raw) {
   if (digits.startsWith("0")) return `62${digits.slice(1)}`;
   if (digits.startsWith("8")) return `62${digits}`;
   return digits;
+}
+
+function parseTelegramTarget(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+
+  if (text.startsWith("@")) {
+    const username = text.slice(1).trim();
+    if (!username) return null;
+    return { kind: "username", value: username };
+  }
+
+  if (/^-?\d{6,}$/.test(text) && text.startsWith("-")) {
+    return { kind: "chatId", value: text };
+  }
+
+  if (/^[A-Za-z][A-Za-z0-9_]{3,}$/.test(text)) {
+    return { kind: "username", value: text };
+  }
+
+  if (/^[+\d][\d+\s().-]*$/.test(text)) {
+    const phone = normalizeIndoMsisdnDigits(text);
+    if (!phone) return null;
+    return { kind: "phone", value: phone };
+  }
+
+  if (/^-?\d+$/.test(text)) {
+    return text.startsWith("-")
+      ? { kind: "chatId", value: text }
+      : { kind: "phone", value: normalizeIndoMsisdnDigits(text) };
+  }
+
+  return null;
 }
 
 function pickFirstString(obj, keys) {
@@ -393,6 +429,44 @@ async function wablasScheduleText(
   return { status: res.status, ok: res.ok, text };
 }
 
+async function telegramSendText(apiToken, sessionId, recipient, message) {
+  const token = String(apiToken || "").trim();
+  const sid = String(sessionId || "").trim();
+  if (!token) throw new Error("missing x-api-token");
+  if (!sid) throw new Error("missing sessionId");
+  if (!recipient || !recipient.kind || !recipient.value) {
+    throw new Error("invalid telegram recipient");
+  }
+
+  const endpoint =
+    recipient.kind === "chatId" ? "/messages/send" : "/messages/send-to-phone";
+  const body =
+    recipient.kind === "chatId"
+      ? {
+          sessionId: sid,
+          chatId: recipient.value,
+          text: String(message || ""),
+        }
+      : {
+          sessionId: sid,
+          text: String(message || ""),
+          ...(recipient.kind === "username"
+            ? { username: recipient.value }
+            : { phone: recipient.value }),
+        };
+
+  const res = await fetch(`${TELEGRAM_BASE}${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-token": token,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  return { status: res.status, ok: res.ok, text };
+}
+
 const LIMITS = {
   minIntervalMs: Number.parseInt(process.env.MIN_INTERVAL_MS || "1500", 10),
   maxPerMinute: Number.parseInt(process.env.MAX_PER_MINUTE || "15", 10),
@@ -471,11 +545,15 @@ function loadStore() {
   try {
     const raw = fs.readFileSync(STORE_PATH, "utf8");
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return { pending: [] };
-    if (!Array.isArray(parsed.pending)) return { pending: [] };
-    return { pending: parsed.pending };
+    if (!parsed || typeof parsed !== "object") {
+      return { pending: [], scheduled: [] };
+    }
+    return {
+      pending: Array.isArray(parsed.pending) ? parsed.pending : [],
+      scheduled: Array.isArray(parsed.scheduled) ? parsed.scheduled : [],
+    };
   } catch {
-    return { pending: [] };
+    return { pending: [], scheduled: [] };
   }
 }
 
@@ -605,6 +683,90 @@ function redactPendingForApi(item) {
   return out;
 }
 
+function redactScheduledForApi(item) {
+  if (!item || typeof item !== "object") return item;
+  const out = { ...item };
+  if ("apiKey" in out) out.apiKey = maskSecret(out.apiKey);
+  if ("secretKey" in out) out.secretKey = maskSecret(out.secretKey);
+  return out;
+}
+
+const telegramTimers = new Map();
+
+async function executeTelegramScheduledJob(jobId) {
+  const job = store.scheduled.find((x) => x && x.id === jobId);
+  if (!job) return;
+  if (job.status !== "queued") return;
+
+  const recipient = job.recipient || null;
+  if (!recipient || !recipient.kind || !recipient.value) {
+    job.status = "error";
+    job.error = "invalid recipient";
+    job.updatedAtMs = Date.now();
+    saveStore(store);
+    return;
+  }
+
+  const rl = rateLimitCheck(job.apiKey || "", recipient.value);
+  if (!rl.ok) {
+    const retryAfterMs = Math.max(250, Number(rl.retryAfterMs || 1000));
+    const when = Date.now() + retryAfterMs;
+    job.scheduleMs = when;
+    job.updatedAtMs = Date.now();
+    saveStore(store);
+    armTelegramTimer(job);
+    return;
+  }
+
+  try {
+    const upstream = await telegramSendText(
+      job.apiKey || "",
+      job.secretKey || "",
+      recipient,
+      job.message || "",
+    );
+    const parsed = safeJsonParse(upstream.text) || upstream.text;
+    if (upstream.ok) rateLimitCommit(job.apiKey || "", recipient.value);
+    job.status = upstream.ok ? "sent" : "error";
+    job.updatedAtMs = Date.now();
+    job.upstream = { status: upstream.status, body: parsed };
+  } catch (err) {
+    job.status = "error";
+    job.updatedAtMs = Date.now();
+    job.error = String(err && err.message ? err.message : err);
+  }
+  saveStore(store);
+}
+
+function armTelegramTimer(job) {
+  if (!job || job.vendor !== "telegram" || job.status !== "queued") return;
+  const existing = telegramTimers.get(job.id);
+  if (existing) clearTimeout(existing);
+
+  const delayMs = Math.max(0, Number(job.scheduleMs || 0) - Date.now());
+  const timer = setTimeout(async () => {
+    telegramTimers.delete(job.id);
+    await executeTelegramScheduledJob(job.id);
+  }, delayMs);
+  telegramTimers.set(job.id, timer);
+}
+
+function restoreTelegramTimers() {
+  const now = Date.now();
+  for (const item of store.scheduled) {
+    if (!item || item.vendor !== "telegram") continue;
+    if (item.status !== "queued") continue;
+    if (!Number.isFinite(item.scheduleMs)) continue;
+    if (item.scheduleMs < now - 24 * 60 * 60 * 1000) {
+      item.status = "expired";
+      item.updatedAtMs = now;
+      continue;
+    }
+    armTelegramTimer(item);
+  }
+  saveStore(store);
+}
+
 const server = http.createServer(async (req, res) => {
   setCors(req, res);
 
@@ -638,7 +800,7 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, {
       ok: true,
       service: "tpwa",
-      vendors: ["starsender", "wablas"],
+      vendors: ["starsender", "wablas", "telegram"],
     });
     return;
   }
@@ -651,6 +813,9 @@ const server = http.createServer(async (req, res) => {
       pending: debug
         ? store.pending
         : store.pending.map((x) => redactPendingForApi(x)),
+      scheduled: debug
+        ? store.scheduled
+        : store.scheduled.map((x) => redactScheduledForApi(x)),
     });
     return;
   }
@@ -878,7 +1043,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (vendor !== "starsender" && vendor !== "wablas") {
+  if (vendor !== "starsender" && vendor !== "wablas" && vendor !== "telegram") {
     sendJson(res, 400, { ok: false, vendor, error: "Unsupported vendor" });
     return;
   }
@@ -893,12 +1058,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (vendor === "wablas" && url.pathname !== "/api/test" && !secretKey) {
+  if (
+    (vendor === "wablas" || vendor === "telegram") &&
+    url.pathname !== "/api/test" &&
+    !secretKey
+  ) {
     sendJson(res, 400, {
       ok: false,
       vendor,
       error: "Missing secret key",
-      hint: "Wablas butuh Authorization header format token.secret_key.",
+      hint:
+        vendor === "telegram"
+          ? "Telegram butuh sessionId/device_tag di Secret Key."
+          : "Wablas butuh Authorization header format token.secret_key.",
     });
     return;
   }
@@ -953,6 +1125,64 @@ const server = http.createServer(async (req, res) => {
           details: String(err && err.message ? err.message : err),
         });
       }
+      return;
+    }
+
+    if (vendor === "telegram") {
+      const target = parseTelegramTarget(candidate);
+      if (!secretKey) {
+        sendJson(res, 200, {
+          ok: true,
+          vendor,
+          tested: false,
+          action: "config-check",
+          note: "Isi Secret Key dengan sessionId/device_tag aktif Telegram.",
+          config: {
+            apiToken: Boolean(apiKey),
+            sessionId: false,
+          },
+        });
+        return;
+      }
+
+      if (!candidate) {
+        sendJson(res, 200, {
+          ok: true,
+          vendor,
+          tested: false,
+          action: "config-check",
+          note: "Isi field To untuk validasi target (nomor/@username/chatId).",
+          config: {
+            apiToken: Boolean(apiKey),
+            sessionId: Boolean(secretKey),
+          },
+        });
+        return;
+      }
+
+      if (!target) {
+        sendJson(res, 400, {
+          ok: false,
+          vendor,
+          tested: false,
+          error: "Target Telegram tidak valid",
+          hint: "Gunakan nomor, @username, atau chatId.",
+        });
+        return;
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        vendor,
+        tested: true,
+        action: "config-check",
+        config: {
+          apiToken: Boolean(apiKey),
+          sessionId: Boolean(secretKey),
+        },
+        request: { target },
+        note: "Test Telegram melakukan validasi konfigurasi lokal tanpa mengirim pesan.",
+      });
       return;
     }
 
@@ -1054,6 +1284,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (requireConfirm) {
+    if (vendor === "telegram") {
+      sendJson(res, 400, {
+        ok: false,
+        vendor,
+        error: "requireConfirm belum didukung untuk Telegram",
+      });
+      return;
+    }
+
     if (!Number.isFinite(scheduleMs)) {
       sendJson(res, 400, {
         ok: false,
@@ -1176,6 +1415,93 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (vendor === "telegram") {
+    const recipient = parseTelegramTarget(toRaw);
+    if (!recipient) {
+      sendJson(res, 400, { ok: false, vendor, error: "Missing/invalid to" });
+      return;
+    }
+
+    const recipientKey = `${recipient.kind}:${recipient.value}`;
+
+    if (Number.isFinite(scheduleMs)) {
+      const id = generateId();
+      const job = {
+        id,
+        vendor: "telegram",
+        recipient,
+        message: text,
+        scheduleMs: Number(scheduleMs),
+        status: "queued",
+        createdAtMs: Date.now(),
+        updatedAtMs: Date.now(),
+        apiKey,
+        secretKey,
+      };
+      store.scheduled.push(job);
+      saveStore(store);
+      armTelegramTimer(job);
+      sendJson(res, 200, {
+        ok: true,
+        vendor,
+        action: "queued_schedule",
+        id,
+        request: {
+          to: recipient,
+          schedule: scheduleMs,
+        },
+      });
+      return;
+    }
+
+    const rl = rateLimitCheck(apiKey, recipientKey);
+    if (!rl.ok) {
+      const retryAfterMs = Math.max(250, Number(rl.retryAfterMs || 1000));
+      sendJson(
+        res,
+        429,
+        {
+          ok: false,
+          vendor,
+          error: "Rate limited",
+          details: { kind: rl.kind, retryAfterMs, limits: LIMITS },
+        },
+        { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) },
+      );
+      return;
+    }
+
+    try {
+      const upstream = await telegramSendText(
+        apiKey,
+        secretKey,
+        recipient,
+        text,
+      );
+      const parsed = safeJsonParse(upstream.text);
+      if (upstream.ok) rateLimitCommit(apiKey, recipientKey);
+      sendJson(res, upstream.ok ? 200 : 502, {
+        ok: upstream.ok,
+        vendor,
+        action: "send",
+        request: {
+          messageType: "text",
+          to: recipient,
+          schedule: scheduleMs,
+        },
+        upstream: { status: upstream.status, body: parsed || upstream.text },
+      });
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        vendor,
+        error: "Upstream request failed",
+        details: String(err && err.message ? err.message : err),
+      });
+    }
+    return;
+  }
+
   const to = normalizeIndoMsisdnDigits(toRaw);
   if (!to) {
     sendJson(res, 400, { ok: false, vendor, error: "Missing/invalid to" });
@@ -1256,6 +1582,8 @@ const server = http.createServer(async (req, res) => {
     });
   }
 });
+
+restoreTelegramTimers();
 
 server.listen(args.port, args.host, () => {
   console.log(`Server: http://${args.host}:${args.port}`);

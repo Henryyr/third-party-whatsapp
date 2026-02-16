@@ -43,7 +43,7 @@
   }
 
   function getVendor() {
-    return getCheckedValue(vendorRadios) || "wablas";
+    return getCheckedValue(vendorRadios) || "telegram";
   }
 
   function getMode() {
@@ -183,7 +183,10 @@
 
   function suggestLocalUrlsIfEmpty(vendor) {
     const isSupported =
-      vendor === "starseeder" || vendor === "starsender" || vendor === "wablas";
+      vendor === "starseeder" ||
+      vendor === "starsender" ||
+      vendor === "wablas" ||
+      vendor === "telegram";
     if (!isSupported) return;
     if (!testUrlEl || !sendUrlEl) return;
 
@@ -209,17 +212,22 @@
 
   function updateVendorNote(vendor) {
     if (!vendorNoteEl) return;
-    const note =
-      vendor === "wablas"
-        ? "Wablas dipilih. Isi konfigurasi, lalu gunakan tombol test untuk cek koneksi."
-        : "StarSeeder dipilih. Untuk StarSender, API key = Device API key (header Authorization). Secret biasanya tidak dipakai.";
+    let note = "";
+    if (vendor === "wablas") {
+      note =
+        "Wablas dipilih. API Key = token device, Secret Key = secret key device.";
+    } else if (vendor === "telegram") {
+      note =
+        "Telegram dipilih (TeleCore). API Key = x-api-token device, Secret Key = sessionId/device_tag aktif.";
+    } else {
+      note =
+        "StarSeeder dipilih. Untuk StarSender, API key = Device API key (header Authorization). Secret biasanya tidak dipakai.";
+    }
     vendorNoteEl.textContent = note;
   }
 
   function vendorNeedsSecret(vendor) {
-    // StarSender docs: only Authorization (Device API key).
-    // Keep secret optional for StarSender/StarSeeder to avoid blocking usage.
-    return vendor === "wablas";
+    return vendor === "wablas" || vendor === "telegram";
   }
 
   function normalizeSubscriberNumber(raw) {
@@ -244,7 +252,7 @@
     return "";
   }
 
-  function parseRecipients(raw) {
+  function parseWhatsappRecipients(raw) {
     const text = toSafeText(raw);
     const parts = text
       .split(/[\s,;]+/)
@@ -263,6 +271,54 @@
     return out;
   }
 
+  function normalizeTelegramRecipient(raw) {
+    const text = toSafeText(raw).trim();
+    if (!text) return "";
+
+    if (text.startsWith("@")) {
+      const u = text.slice(1).trim();
+      return u ? `@${u}` : "";
+    }
+
+    if (/^-?\d{6,}$/.test(text)) return text;
+
+    if (/^[A-Za-z][A-Za-z0-9_]{3,}$/.test(text)) {
+      return `@${text}`;
+    }
+
+    if (/^[+\d][\d+\s().-]*$/.test(text)) {
+      const d = normalizeSubscriberNumber(text);
+      return d ? `62${d}` : "";
+    }
+
+    return text;
+  }
+
+  function parseTelegramRecipients(raw) {
+    const text = toSafeText(raw);
+    const parts = text
+      .split(/[\n,;]+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    const seen = new Set();
+    const out = [];
+    for (const p of parts) {
+      const v = normalizeTelegramRecipient(p);
+      if (!v) continue;
+      const key = v.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(v);
+    }
+    return out;
+  }
+
+  function parseRecipientsByVendor(raw, vendor) {
+    if (vendor === "telegram") return parseTelegramRecipients(raw);
+    return parseWhatsappRecipients(raw);
+  }
+
   function parseSchedule(value) {
     const local = (value || "").trim();
     if (!local) return { local: "", iso: "", epochMs: null };
@@ -275,8 +331,8 @@
   function buildPayload() {
     const vendor = getVendor();
     const mode = getMode();
-    const toList = parseRecipients(getToRaw());
-    const to = { e164: toList[0] || "" };
+    const toList = parseRecipientsByVendor(getToRaw(), vendor);
+    const to = { value: toList[0] || "" };
     const message = toSafeText(messageEl?.value || "");
 
     const schedule =
@@ -300,7 +356,7 @@
     return {
       vendor,
       mode,
-      to: to.e164,
+      to: to.value,
       toList,
       message: `${message}${optOutText}`,
       scheduleAt: schedule,
@@ -313,7 +369,7 @@
     clearInvalid();
     const vendor = getVendor();
     const cfg = readConfigFromInputs();
-    const toList = parseRecipients(getToRaw());
+    const toList = parseRecipientsByVendor(getToRaw(), vendor);
 
     if (!cfg.apiKey) {
       markInvalid(apiKeyEl);

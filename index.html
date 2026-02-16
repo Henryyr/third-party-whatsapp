@@ -3,10 +3,10 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>WhatsApp Sender</title>
+        <title>WhatsApp & Telegram Sender</title>
         <meta
             name="description"
-            content="Form pengiriman WhatsApp dengan format +62, pesan, dan opsi jadwal."
+            content="Form pengiriman WhatsApp/Telegram, dukung banyak tujuan, dan opsi jadwal."
         />
 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -24,13 +24,13 @@
 
         <main class="wrap">
             <header class="hero">
-                <div class="badge">Third Party WhatsApp</div>
-                <h1>Pengiriman WhatsApp</h1>
+                <div class="badge">Third Party Messaging</div>
+                <h1>Pengiriman WhatsApp & Telegram</h1>
                 <p>
-                    Masukkan nomor <span class="mono">To</span> dengan prefix
-                    <span class="mono">+62</span>, tulis pesan, lalu kirim
-                    sekarang atau jadwalkan. Nomor pengirim mengikuti device
-                    dari API key.
+                    Masukkan tujuan <span class="mono">To</span> (nomor,
+                    username, atau chat ID), tulis pesan, lalu kirim sekarang
+                    atau jadwalkan. Nomor/akun pengirim mengikuti device dari
+                    API key.
                 </p>
             </header>
 
@@ -41,7 +41,6 @@
                     id="vendorWablas"
                     name="vendor"
                     value="wablas"
-                    checked
                 />
                 <input
                     class="sr-only"
@@ -49,6 +48,14 @@
                     id="vendorStarSeeder"
                     name="vendor"
                     value="starseeder"
+                />
+                <input
+                    class="sr-only"
+                    type="radio"
+                    id="vendorTelegram"
+                    name="vendor"
+                    value="telegram"
+                    checked
                 />
                 <input
                     class="sr-only"
@@ -80,6 +87,10 @@
                         <label class="seg" for="vendorStarSeeder">
                             <span class="seg-title">StarSeeder</span>
                             <span class="seg-sub">Third-party gateway</span>
+                        </label>
+                        <label class="seg" for="vendorTelegram">
+                            <span class="seg-title">Telegram</span>
+                            <span class="seg-sub">TeleCore API</span>
                         </label>
                     </div>
                     <p class="vendor-note" id="vendorNote"></p>
@@ -120,12 +131,13 @@
                                 type="password"
                                 id="secretKey"
                                 name="secretKey"
-                                placeholder="Masukkan secret key…"
+                                placeholder="Masukkan secret key / session…"
                                 autocomplete="off"
                             />
                             <span class="hint"
-                                >Jangan share. Simpan di browser hanya jika
-                                perangkat aman.</span
+                                >Untuk Telegram isi
+                                <span class="mono">sessionId/device_tag</span>.
+                                Jangan share.</span
                             >
                         </label>
                     </section>
@@ -198,18 +210,16 @@
                     <textarea
                         name="to"
                         rows="3"
-                        inputmode="numeric"
-                        placeholder="08123456789, 08139876543 (pisahkan dengan koma / baris baru)"
+                        placeholder="08123456789, @username, -1001234567890 (pisahkan dengan koma / baris baru)"
                         autocomplete="off"
                         spellcheck="false"
                         required
                     ></textarea>
                     <span class="hint"
-                        >Bisa lebih dari 1 nomor. Boleh format
-                        <span class="mono">08…</span> /
-                        <span class="mono">62…</span> /
-                        <span class="mono">+62…</span>. Akan dinormalisasi
-                        otomatis.</span
+                        >Bisa lebih dari 1 tujuan. Untuk WhatsApp gunakan nomor
+                        <span class="mono">08…/62…/+62…</span>, untuk Telegram
+                        bisa nomor, <span class="mono">@username</span>, atau
+                        <span class="mono">chatId</span>.</span
                     >
                 </label>
 
@@ -237,7 +247,7 @@
                         />
                         <span
                             >Saya punya izin/opt-in dari penerima untuk
-                            dihubungi via WhatsApp</span
+                            dihubungi via WhatsApp/Telegram</span
                         >
                     </label>
                     <label class="checkline">
@@ -329,9 +339,9 @@
                 <footer class="fineprint">
                     <p>
                         Pastikan format nomor benar. Prefix
-                        <span class="mono">+62</span> sudah otomatis. Nomor
-                        pengirim mengikuti device dari API key. Vendor &amp;
-                        konfigurasi dipakai saat test/kirim.
+                        <span class="mono">+62</span> otomatis untuk input nomor
+                        Indonesia. Vendor &amp; konfigurasi dipakai saat
+                        test/kirim.
                     </p>
                 </footer>
             </form>
